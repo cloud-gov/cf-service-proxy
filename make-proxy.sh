@@ -161,7 +161,7 @@ if [ "$PRINT_CREDS" = 1 ]
     | jq -r '.resources[].entity.service_bindings[0].entity.credentials.password')
 
   SERVICE_GUID=$(cf curl  \
-    "/v2/spaces/$(cat ~/.cf/config.json | jq -r .SpaceFields.Guid)/apps?q=name%3Aeservice-proxy&inline-relations-depth=1" \
+    "/v2/spaces/$(cat ~/.cf/config.json | jq -r .SpaceFields.Guid)/apps?q=name%3A${SERVICE_ALIAS}&inline-relations-depth=1" \
     | jq -r '.resources[].metadata.guid')
 
   SERVICE_DOMAIN=$(cf curl \

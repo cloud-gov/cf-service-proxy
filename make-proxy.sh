@@ -95,8 +95,8 @@ if [ "$SVC_APP_STATUS" != "STARTED" ]
   log "Creating ${SERVICE_ALIAS}..."
   # cd service-proxy
   cf push ${SERVICE_ALIAS} \
+    --random-route \
     --no-start \
-    -p '' \
     -b https://github.com/cloudfoundry/staticfile-buildpack.git \
     -m 16m \
     -k 16m > /dev/null
@@ -110,13 +110,13 @@ log ""
 log "Getting credentials for ${APP_NAME} service bindings."
 SVC_PORT=$(cf curl \
   "/v2/spaces/$(cat ~/.cf/config.json | jq -r .SpaceFields.Guid)/apps?q=name%3A${APP_NAME}&inline-relations-depth=1" \
-  | jq -r '.resources[].entity.service_bindings[].entity.credentials.port | select(. != null)')
+  | jq -r '.resources[].entity.service_bindings[].entity.credentials.port | select(. != null)' | head -n1)
 
 log "  Port: ${SVC_PORT}"
 
 SVC_IP=$(cf curl \
   "/v2/spaces/$(cat ~/.cf/config.json | jq -r .SpaceFields.Guid)/apps?q=name%3A${APP_NAME}&inline-relations-depth=1" \
-  | jq -r '.resources[].entity.service_bindings[].entity.credentials.hostname | select(. != null)')
+  | jq -r '.resources[].entity.service_bindings[].entity.credentials.hostname | select(. != null)' | head -n1)
 
 log "  IP: ${SVC_IP}"
 log ""

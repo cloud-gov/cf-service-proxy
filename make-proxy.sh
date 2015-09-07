@@ -195,6 +195,7 @@ function get_app_status () {
     || return 1
 
   jq -er '.resources[0].entity.state' <(echo $APP_STATUS) > /dev/null \
+    && APP_STATE=$(jq -er '.resources[0].entity.state' <(echo $APP_STATUS)) \
     && return 0
 }
 
@@ -303,8 +304,8 @@ if [ "$SVC_IP" != "$PROXY_HOST" ] || [ "$SVC_PORT" != "$PROXY_PORT" ]; then
   bind_env_var ${SERVICE_APP} "PROXY_PORT" $SVC_PORT
 
   # Restage the prxy app to pick up variables.
-  if [ "$SVC_APP_STATUS" != "STARTED" ]
-    then
+  get_app_status $SERVICE_APP
+  if [ "$APP_STATE" != "STARTED" ]; then
     log "- Finishing start of ${SERVICE_APP}."
     cf start ${SERVICE_APP} > /dev/null
   else

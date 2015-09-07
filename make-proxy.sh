@@ -1,12 +1,12 @@
 # set -x
 ###
-# Vars
+# Default Vars
 ###
 
 # Default variables.
 PRINT_CREDS=0
-APP_NAME="app"
-SERVICE_NAME="service"
+s_flag=0;
+a_flag=0;
 _V=1
 
 ###
@@ -22,25 +22,23 @@ function help {
     echo "-p            print url and credentials to he console"
     echo "-s            name of service to proxy"
     echo "-u            only print the connection string - useful for scripts"
+    echo "-d            proxy route domain"
 
 }
 
-while getopts 'a:s:pu' flag
+while getopts 'ad:s:pu' flag
 
 do
     case $flag in
-        a) APP_NAME=$OPTARG;;
+        a) APP_NAME=1; a_flag=1;;
+        d) APP_DOMAIN=$OPTARG;;
         p) PRINT_CREDS=1;;
-        s) SERVICE_NAME=$OPTARG;;
+        s) SERVICE_NAME=$OPTARG; s_flag=1;;
         u) _V=0;;
         h) help; exit 0;;
         \?) help; exit 2;;
     esac
 done
-
-# Give the proxy a useful suffix.
-SERVICE_ALIAS=$SERVICE_NAME
-SERVICE_ALIAS=${SERVICE_ALIAS}-proxy
 
 ###
 # Logging
@@ -54,6 +52,22 @@ function log () {
     fi
 }
 
+function bail () {
+      echo "$@"
+      exit 1
+}
+
+###
+# Warning.
+###
+if [ "$a_flag" -eq 1 ]; then
+  log ""
+  log "##########"
+  log "NOTE: The -a switch is no longer necessary and will be removed."
+  log "##########"
+  log ""
+fi
+
 ###
 # Check for jq.
 ###
@@ -61,8 +75,15 @@ function log () {
 # Make sure jq is available.
 log "Looking for jq."
 JQ_PATH=$(which jq)
-if [[ ! -n ${JQ_PATH} ]]
-  then
+if [[ -n ${JQ_PATH} ]]; then
+  JQ_VERSION=$($JQ_PATH --version)
+  if [ "$JQ_VERSION" != "jq-1.5" ]; then
+    log "  - Upgrading jq."
+    brew upgrade jq
+    else
+      log "  - Found jq."
+    fi
+  else
     log "  - Installing jq."
     OS_TYPE=$(uname -a | uname -a | cut -f1 -d" ")
     if [ "$OS_TYPE" = "Darwin" ]
@@ -72,31 +93,172 @@ if [[ ! -n ${JQ_PATH} ]]
       log "    Couldn't find jq and don't have a method to install it."
       log "    After adding https://stedolan.github.io/jq/ try again."
     fi
-  else
-    log "  - Found jq."
 fi
 
+###
+# Functions.
+###
+
+function make_tmp_app () {
+  UUID=$(uuidgen)
+  TMP_APP=placeholder-${UUID}
+  TMP_DIR="/tmp"
+  TMP_PATH=${TMP_DIR}/${TMP_APP}
+  mkdir -p $TMP_PATH
+  touch $TMP_PATH/Staticfile
+
+  # Create the temp app.
+  log "Creating temp app: $TMP_APP"
+  cf push $TMP_APP \
+    --no-route \
+    -m 5m \
+    -k 5m \
+    -p $TMP_PATH \
+    --no-start \
+    -b https://github.com/cloudfoundry/staticfile-buildpack.git > /dev/null
+  if [ $? -ne 0 ]; then
+    echo "Failed to create temp app: $TMP_APP"
+  fi
+
+  #Bind service.
+  log "Binding service to temp app: $TMP_APP"
+  cf bs $TMP_APP $SERVICE_NAME > /dev/null
+  if [ $? -ne 0 ]; then
+    echo "Failed bind service $TMP_APP to $SERVICE_NAME."
+  fi
+
+  # Check that bindings are good.
+  if ! get_svc_bindings; then
+
+    # Delete temp app.
+    log "Deleting: $TMP_APP"
+    cf delete -f $TMP_APP > /dev/null
+    if [ $? -ne 0 ]; then
+      echo "Failed to delete $TMP_APP."
+    fi
+
+    # Clean up local artifacts.
+    log "Cleaning up: $TMP_PATH"
+    rm $TMP_PATH/Staticfile
+    rmdir $TMP_PATH
+    return 0
+  else
+    echo "Failed to make app."
+  fi
+}
+
+# Get app service bindings.
+function get_svc_bindings () {
+  log "  - Checking service bindings for $SERVICE_NAME."
+  SVC_STATUS=$(cf curl \
+    "/v2/spaces/${SPACE_GUID}/service_instances?return_user_provided_service_instances=true&q=name%3A${SERVICE_NAME}&inline-relations-depth=1")
+
+  jq -er '.total_results > 0' <(echo $SVC_STATUS) > /dev/null \
+    || bail "  - Service not found: $SERVICE_NAME";
+
+  jq -er '.resources[0].entity.service_bindings != []' <(echo $SVC_STATUS) > /dev/null \
+    && return 1
+
+  return 0
+}
+
+# Get app service bindings.
+function get_svc_credentials () {
+  log "Getting service credentials for $SERVICE_NAME."
+
+  SVC_CREDENTIALS=$(jq '.resources[0].entity.service_bindings[0].entity.credentials' <(echo $SVC_STATUS))
+
+  return 0
+}
+
+# Get app service bindings.
+function get_proxy_env () {
+  log "Getting app environment for $SERVICE_ALIAS."
+
+  PROXY_STATUS=$(cf curl \
+    "/v2/spaces/$(cat ~/.cf/config.json | jq -r .SpaceFields.Guid)/apps?q=name%3A${SERVICE_ALIAS}&inline-relations-depth=1")
+
+  PROXY_ENV=$(jq -er '.resources[].entity.environment_json' <(echo $PROXY_STATUS))
+
+  return 0
+}
+
+function get_app_status () {
+  log "Checking status for $1."
+
+  APP_STATUS=$(cf curl \
+    "/v2/spaces/${SPACE_GUID}/apps?q=name%3A${1}&inline-relations-depth=1")
+
+  jq -er '.total_results > 0' <(echo $APP_STATUS) > /dev/null \
+    || return 1
+
+  jq -er '.resources[0].entity.state' <(echo $APP_STATUS) > /dev/null \
+    && return 0
+}
+
+function get_domains () {
+  log "Getting domains for $ORG_NAME."
+
+  SHARED_DOMAINS=$(cf curl \
+    "/v2/shared_domains")
+
+  jq -er '.resources[0].entity.name' <(echo $SHARED_DOMAINS) > /dev/null \
+    || bail "No domains found!"
+
+  APP_DOMAIN=$(jq -er '.resources[0].entity.name' <(echo $SHARED_DOMAINS))
+
+  return 0
+}
+
+function bind_env_var () {
+  log "  + Binding $1 to $2 in $3."
+  cf se ${1} ${2} ${3} > /dev/null
+  if [ $? -ne 0 ]; then
+    bail "Failed bind variable $1 to $2 in $3."
+  fi
+}
+
+###
+# Vars.
+###
+
+# GUID of the currently targeted space.
+CF_CONFIG=$(jq -rc . ~/.cf/config.json)
+SPACE_GUID=$(jq -r .SpaceFields.Guid <(echo $CF_CONFIG))
+SPACE_NAME=$(jq -r .SpaceFields.Name <(echo $CF_CONFIG))
+ORG_GUIDE=$(jq -r .OrganizationFields.Guid <(echo $CF_CONFIG))
+ORG_NAME=$(jq -r .OrganizationFields.Name <(echo $CF_CONFIG))
+
+# Give the proxy a useful suffix.
+SERVICE_ALIAS=${ORG_NAME}-${SPACE_NAME}-${SERVICE_NAME}-proxy
+
+# Domain.
+if [ -z "$APP_DOMAIN" ]; then
+  get_domains
+fi
 
 ###
 # Create the service proxy.
 ###
 
-# Get app status.
-log "Getting status for ${SERVICE_ALIAS}."
-SVC_APP_STATUS=$(cf curl \
-  "/v2/spaces/$(cat ~/.cf/config.json | jq -r .SpaceFields.Guid)/apps?q=name%3A${SERVICE_ALIAS}&inline-relations-depth=1" \
-  | jq -r '.resources[0].entity.state')
+# Let them know what we're doing.
+log "Getting status for ${SERVICE_NAME}."
 
-log "  Status: ${SVC_APP_STATUS}"
+# Get information about named service. Create a temporary app in order to get
+# bindings of none exist.
+if ! get_svc_bindings; then
+  log "    - Found bindings."
+  # echo "Returned 1"
+else
+  # echo "Returned 0"
+  make_tmp_app
+fi
 
-# Only create the app if it doesn't exist.
-if [ "$SVC_APP_STATUS" != "STARTED" ]
-  then
+if ! get_app_status $SERVICE_ALIAS; then
   log "Creating ${SERVICE_ALIAS}..."
-  # cd service-proxy
   cf push ${SERVICE_ALIAS} \
-    --random-route \
     --no-start \
+    -d $APP_DOMAIN \
     -b https://github.com/cloudfoundry/staticfile-buildpack.git \
     -m 16m \
     -k 16m > /dev/null
@@ -106,36 +268,31 @@ fi
 
 log ""
 
+get_svc_credentials
+
 # Get elasticsearch service port and address for use by the service proxy.
-log "Getting credentials for ${APP_NAME} service bindings."
-SVC_PORT=$(cf curl \
-  "/v2/spaces/$(cat ~/.cf/config.json | jq -r .SpaceFields.Guid)/apps?q=name%3A${APP_NAME}&inline-relations-depth=1" \
-  | jq -r '.resources[].entity.service_bindings[].entity.credentials.port | select(. != null)' | head -n1)
+SVC_PORT=$(jq -er '.port' <(echo $SVC_CREDENTIALS))
 
 log "  Port: ${SVC_PORT}"
 
-SVC_IP=$(cf curl \
-  "/v2/spaces/$(cat ~/.cf/config.json | jq -r .SpaceFields.Guid)/apps?q=name%3A${APP_NAME}&inline-relations-depth=1" \
-  | jq -r '.resources[].entity.service_bindings[].entity.credentials.hostname | select(. != null)' | head -n1)
+SVC_IP=$(jq -er '.hostname' <(echo $SVC_CREDENTIALS))
 
 log "  IP: ${SVC_IP}"
 log ""
 
-PROXY_PORT=$(cf curl \
-  "/v2/spaces/$(cat ~/.cf/config.json | jq -r .SpaceFields.Guid)/apps?q=name%3A${SERVICE_ALIAS}&inline-relations-depth=1" \
-  | jq -r '.resources[].entity.environment_json.PROXY_PORT')
+get_proxy_env
 
-PROXY_HOST=$(cf curl \
-  "/v2/spaces/$(cat ~/.cf/config.json | jq -r .SpaceFields.Guid)/apps?q=name%3A${SERVICE_ALIAS}&inline-relations-depth=1" \
-  | jq -r '.resources[].entity.environment_json.PROXY_PORT')
+PROXY_PORT=$(jq -r '.PROXY_PORT' <(echo $PROXY_ENV))
 
-if [ "$SVC_IP" != "$PROXY_HOST" ] && [ "$SVC_PORT" != "$PROXY_PORT" ]
-  then
+PROXY_HOST=$(jq -r '.PROXY_HOST' <(echo $PROXY_ENV))
+
+if [ "$SVC_IP" != "$PROXY_HOST" ] || [ "$SVC_PORT" != "$PROXY_PORT" ]; then
+  log "! Proxy vars don't match."
 
   # Bind proxy variables.
-  log "- Injecting service credentials into ${SERVICE_ALIAS}."
-  cf se ${SERVICE_ALIAS} PROXY_HOST $SVC_IP > /dev/null
-  cf se ${SERVICE_ALIAS} PROXY_PORT $SVC_PORT > /dev/null
+  log "+ Injecting service credentials into ${SERVICE_ALIAS}."
+  bind_env_var $SERVICE_ALIAS "PROXY_HOST" $SVC_IP
+  bind_env_var $SERVICE_ALIAS "PROXY_PORT" $SVC_PORT
 
   # Restage the prxy app to pick up variables.
   if [ "$SVC_APP_STATUS" != "STARTED" ]
@@ -151,29 +308,23 @@ fi
 if [ "$PRINT_CREDS" = 1 ]
   then
 
-  log "- Getting credentials for ${SERVICE_ALIAS}."
-  SERVICE_USER=$(cf curl \
-    "/v2/spaces/$(cat ~/.cf/config.json | jq -r .SpaceFields.Guid)/service_instances?q=name%3A${SERVICE_NAME}&inline-relations-depth=1" \
-    | jq -r '.resources[].entity.service_bindings[0].entity.credentials.username')
+  log "  - Getting credentials for ${SERVICE_ALIAS}."
+  SERVICE_USER=$(jq -er '.username' <(echo $SVC_CREDENTIALS))
 
-  SERVICE_PASS=$(cf curl \
-    "/v2/spaces/$(cat ~/.cf/config.json | jq -r .SpaceFields.Guid)/service_instances?q=name%3A${SERVICE_NAME}&inline-relations-depth=1" \
-    | jq -r '.resources[].entity.service_bindings[0].entity.credentials.password')
+  SERVICE_PASS=$(jq -er '.password' <(echo $SVC_CREDENTIALS))
 
-  SERVICE_GUID=$(cf curl  \
-    "/v2/spaces/$(cat ~/.cf/config.json | jq -r .SpaceFields.Guid)/apps?q=name%3A${SERVICE_ALIAS}&inline-relations-depth=1" \
-    | jq -r '.resources[].metadata.guid')
+  get_app_status $SERVICE_ALIAS
+
+  SERVICE_GUID=$(jq -r '.resources[].metadata.guid' <(echo $APP_STATUS))
 
   SERVICE_DOMAIN=$(cf curl \
     "/v2/apps/${SERVICE_GUID}/stats" \
     | jq -r '."0".stats.uris[0]')
 
   log ""
-  log "  - Access the the proxied service here:"
+  log "Access the the proxied service here:"
   log ""
   echo "https://${SERVICE_USER}:${SERVICE_PASS}@${SERVICE_DOMAIN}"
 fi
 
-log ""
-log "- Finished."
-log ""
+log "Done."

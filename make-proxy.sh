@@ -7,6 +7,8 @@
 PRINT_CREDS=0
 s_flag=0;
 a_flag=0;
+z_flag=0;
+g_flag=0;
 _V=1
 
 ###
@@ -23,10 +25,12 @@ function help {
     echo "-s            name of service to proxy"
     echo "-u            only print the connection string - useful for scripts"
     echo "-d            proxy route domain"
-
+    echo "-z            custom port to proxy"
+    echo "-n            proxy app name"
+    echo "-g            use nginx-auth"
 }
 
-while getopts 'ad:s:pu' flag
+while getopts 'ad:s:puz:n:g:' flag
 
 do
     case $flag in
@@ -34,7 +38,10 @@ do
         d) APP_DOMAIN=$OPTARG;;
         p) PRINT_CREDS=1;;
         s) SERVICE_NAME=$OPTARG; s_flag=1;;
+        n) PROXY_NAME=$OPTARG;;
+        g) NGINX_DIR=$OPTARG; g_flag=1;;
         u) _V=0;;
+        z) CUSTOM_PORT=$OPTARG; z_flag=1;;
         h) help; exit 0;;
         \?) help; exit 2;;
     esac
@@ -193,6 +200,7 @@ function get_app_status () {
     || return 1
 
   jq -er '.resources[0].entity.state' <(echo $APP_STATUS) > /dev/null \
+    && APP_STATE=$(jq -er '.resources[0].entity.state' <(echo $APP_STATUS)) \
     && return 0
 }
 
@@ -208,6 +216,23 @@ function get_domains () {
   APP_DOMAIN=$(jq -er '.resources[0].entity.name' <(echo $SHARED_DOMAINS))
 
   return 0
+}
+
+function app_start_or_restage () {
+  get_app_status $1
+  if [ ! -z $2 ] && [ "$APP_STATE" = "$2" ];then
+    return 0
+  fi
+  case $APP_STATE in
+    STOPPED)
+      log "- Finishing start of ${SERVICE_APP}."
+      cf start ${SERVICE_APP} > /dev/null
+      ;;
+    STARTED)
+      log "- Restaging ${SERVICE_APP} to pick up variable changes."
+      cf restage ${SERVICE_APP} > /dev/null
+      ;;
+    esac
 }
 
 function bind_env_var () {
@@ -230,8 +255,13 @@ ORG_GUIDE=$(jq -r .OrganizationFields.Guid <(echo $CF_CONFIG))
 ORG_NAME=$(jq -r .OrganizationFields.Name <(echo $CF_CONFIG))
 
 # Give the proxy a useful suffix.
-SERVICE_APP=${SERVICE_NAME}-proxy
-SERVICE_ALIAS=${ORG_NAME}-${SPACE_NAME}-${SERVICE_NAME}-proxy
+if [ -z $PROXY_NAME ];then
+  SERVICE_APP=${SERVICE_NAME}-proxy
+  SERVICE_ALIAS=${ORG_NAME}-${SPACE_NAME}-${SERVICE_NAME}-proxy
+else
+  SERVICE_APP=${PROXY_NAME}-proxy
+  SERVICE_ALIAS=${ORG_NAME}-${SPACE_NAME}-${PROXY_NAME}-proxy
+fi
 
 # Domain.
 if [ -z "$APP_DOMAIN" ]; then
@@ -249,16 +279,21 @@ log "Getting status for ${SERVICE_NAME}."
 # bindings of none exist.
 if ! get_svc_bindings; then
   log "    - Found bindings."
-  # echo "Returned 1"
 else
-  # echo "Returned 0"
   make_tmp_app
+fi
+
+if [ "$g_flag" -eq 1 ];then
+  PUSH_DIR=$NGINX_DIR
+else
+  PUSH_DIR="."
 fi
 
 if ! get_app_status $SERVICE_APP; then
   log "Creating ${SERVICE_APP}..."
   cf push ${SERVICE_APP} \
     --no-start \
+    -p $PUSH_DIR \
     -d $APP_DOMAIN \
     -n $SERVICE_ALIAS \
     -b https://github.com/cloudfoundry/staticfile-buildpack.git \
@@ -273,7 +308,11 @@ log ""
 get_svc_credentials
 
 # Get elasticsearch service port and address for use by the service proxy.
-SVC_PORT=$(jq -er '.port' <(echo $SVC_CREDENTIALS))
+if [ $z_flag -eq 1 ]; then
+    SVC_PORT=$(jq -er --arg PORT "$CUSTOM_PORT" '.ports | .[$PORT]' <(echo $SVC_CREDENTIALS))
+  else
+    SVC_PORT=$(jq -er '.port' <(echo $SVC_CREDENTIALS))
+fi
 
 log "  Port: ${SVC_PORT}"
 
@@ -297,14 +336,7 @@ if [ "$SVC_IP" != "$PROXY_HOST" ] || [ "$SVC_PORT" != "$PROXY_PORT" ]; then
   bind_env_var ${SERVICE_APP} "PROXY_PORT" $SVC_PORT
 
   # Restage the prxy app to pick up variables.
-  if [ "$SVC_APP_STATUS" != "STARTED" ]
-    then
-    log "- Finishing start of ${SERVICE_APP}."
-    cf start ${SERVICE_APP} > /dev/null
-  else
-    log "- Restaging ${SERVICE_APP} to pick up variable changes."
-    cf restage ${SERVICE_APP} > /dev/null
-  fi
+  app_start_or_restage $SERVICE_APP
 fi
 
 if [ "$PRINT_CREDS" = 1 ]
@@ -315,7 +347,7 @@ if [ "$PRINT_CREDS" = 1 ]
 
   SERVICE_PASS=$(jq -er '.password' <(echo $SVC_CREDENTIALS))
 
-  get_app_status $SERVICE_APP
+  app_start_or_restage $SERVICE_APP "STARTED"
 
   SERVICE_GUID=$(jq -r '.resources[].metadata.guid' <(echo $APP_STATUS))
 

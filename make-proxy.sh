@@ -220,13 +220,19 @@ function get_domains () {
 
 function app_start_or_restage () {
   get_app_status $1
-  if [ "$APP_STATE" != "STARTED" ]; then
-    log "- Finishing start of ${SERVICE_APP}."
-    cf start ${SERVICE_APP} > /dev/null
-  else
-    log "- Restaging ${SERVICE_APP} to pick up variable changes."
-    cf restage ${SERVICE_APP} > /dev/null
+  if [ ! -z $2 ] && [ "$APP_STATE" = "$2" ];then
+    return 0
   fi
+  case $APP_STATE in
+    STOPPED)
+      log "- Finishing start of ${SERVICE_APP}."
+      cf start ${SERVICE_APP} > /dev/null
+      ;;
+    STARTED)
+      log "- Restaging ${SERVICE_APP} to pick up variable changes."
+      cf restage ${SERVICE_APP} > /dev/null
+      ;;
+    esac
 }
 
 function bind_env_var () {
@@ -341,7 +347,7 @@ if [ "$PRINT_CREDS" = 1 ]
 
   SERVICE_PASS=$(jq -er '.password' <(echo $SVC_CREDENTIALS))
 
-  app_start_or_restage $SERVICE_APP
+  app_start_or_restage $SERVICE_APP "STARTED"
 
   SERVICE_GUID=$(jq -r '.resources[].metadata.guid' <(echo $APP_STATUS))
 

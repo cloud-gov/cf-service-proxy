@@ -7,6 +7,7 @@
 PRINT_CREDS=0
 s_flag=0;
 a_flag=0;
+z_flag=0;
 _V=1
 
 ###
@@ -23,10 +24,10 @@ function help {
     echo "-s            name of service to proxy"
     echo "-u            only print the connection string - useful for scripts"
     echo "-d            proxy route domain"
-
+    echo "-z            custom port to proxy"
 }
 
-while getopts 'ad:s:pu' flag
+while getopts 'ad:s:puz:' flag
 
 do
     case $flag in
@@ -35,6 +36,7 @@ do
         p) PRINT_CREDS=1;;
         s) SERVICE_NAME=$OPTARG; s_flag=1;;
         u) _V=0;;
+        z) CUSTOM_PORT=$OPTARG; z_flag=1;;
         h) help; exit 0;;
         \?) help; exit 2;;
     esac
@@ -273,7 +275,11 @@ log ""
 get_svc_credentials
 
 # Get elasticsearch service port and address for use by the service proxy.
-SVC_PORT=$(jq -er '.port' <(echo $SVC_CREDENTIALS))
+if [ $z_flag -eq 1 ]; then
+    SVC_PORT=$(jq -er --arg PORT "$CUSTOM_PORT" '.ports | .[$PORT]' <(echo $SVC_CREDENTIALS))
+  else
+    SVC_PORT=$(jq -er '.port' <(echo $SVC_CREDENTIALS))
+fi
 
 log "  Port: ${SVC_PORT}"
 

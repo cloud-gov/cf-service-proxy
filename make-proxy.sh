@@ -173,10 +173,10 @@ function get_svc_credentials () {
 
 # Get app service bindings.
 function get_proxy_env () {
-  log "Getting app environment for $SERVICE_ALIAS."
+  log "Getting app environment for $SERVICE_APP."
 
   PROXY_STATUS=$(cf curl \
-    "/v2/spaces/$(cat ~/.cf/config.json | jq -r .SpaceFields.Guid)/apps?q=name%3A${SERVICE_ALIAS}&inline-relations-depth=1")
+    "/v2/spaces/$(cat ~/.cf/config.json | jq -r .SpaceFields.Guid)/apps?q=name%3A${SERVICE_APP}&inline-relations-depth=1")
 
   PROXY_ENV=$(jq -er '.resources[].entity.environment_json' <(echo $PROXY_STATUS))
 
@@ -230,6 +230,7 @@ ORG_GUIDE=$(jq -r .OrganizationFields.Guid <(echo $CF_CONFIG))
 ORG_NAME=$(jq -r .OrganizationFields.Name <(echo $CF_CONFIG))
 
 # Give the proxy a useful suffix.
+SERVICE_APP=${SERVICE_NAME}-proxy
 SERVICE_ALIAS=${ORG_NAME}-${SPACE_NAME}-${SERVICE_NAME}-proxy
 
 # Domain.
@@ -254,11 +255,12 @@ else
   make_tmp_app
 fi
 
-if ! get_app_status $SERVICE_ALIAS; then
-  log "Creating ${SERVICE_ALIAS}..."
-  cf push ${SERVICE_ALIAS} \
+if ! get_app_status $SERVICE_APP; then
+  log "Creating ${SERVICE_APP}..."
+  cf push ${SERVICE_APP} \
     --no-start \
     -d $APP_DOMAIN \
+    -n $SERVICE_ALIAS \
     -b https://github.com/cloudfoundry/staticfile-buildpack.git \
     -m 16m \
     -k 16m > /dev/null
@@ -290,30 +292,30 @@ if [ "$SVC_IP" != "$PROXY_HOST" ] || [ "$SVC_PORT" != "$PROXY_PORT" ]; then
   log "! Proxy vars don't match."
 
   # Bind proxy variables.
-  log "+ Injecting service credentials into ${SERVICE_ALIAS}."
-  bind_env_var $SERVICE_ALIAS "PROXY_HOST" $SVC_IP
-  bind_env_var $SERVICE_ALIAS "PROXY_PORT" $SVC_PORT
+  log "+ Injecting service credentials into ${SERVICE_APP}."
+  bind_env_var ${SERVICE_APP} "PROXY_HOST" $SVC_IP
+  bind_env_var ${SERVICE_APP} "PROXY_PORT" $SVC_PORT
 
   # Restage the prxy app to pick up variables.
   if [ "$SVC_APP_STATUS" != "STARTED" ]
     then
-    log "- Finishing start of ${SERVICE_ALIAS}."
-    cf start ${SERVICE_ALIAS} > /dev/null
+    log "- Finishing start of ${SERVICE_APP}."
+    cf start ${SERVICE_APP} > /dev/null
   else
-    log "- Restaging ${SERVICE_ALIAS} to pick up variable changes."
-    cf restage ${SERVICE_ALIAS} > /dev/null
+    log "- Restaging ${SERVICE_APP} to pick up variable changes."
+    cf restage ${SERVICE_APP} > /dev/null
   fi
 fi
 
 if [ "$PRINT_CREDS" = 1 ]
   then
 
-  log "  - Getting credentials for ${SERVICE_ALIAS}."
+  log "  - Getting credentials for ${SERVICE_APP}."
   SERVICE_USER=$(jq -er '.username' <(echo $SVC_CREDENTIALS))
 
   SERVICE_PASS=$(jq -er '.password' <(echo $SVC_CREDENTIALS))
 
-  get_app_status $SERVICE_ALIAS
+  get_app_status $SERVICE_APP
 
   SERVICE_GUID=$(jq -r '.resources[].metadata.guid' <(echo $APP_STATUS))
 

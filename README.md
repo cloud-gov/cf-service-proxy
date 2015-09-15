@@ -55,14 +55,6 @@ Hostname portion of the proxy app route.
 
 **Use:** Force a specific domain to be used when creating the proxy route.
 
-##### -g (Optional)
-
-Disable basic authentication in the proxy.
-
-**Default:** A random basic authentication username and password will be set.
-
-**Use:** When you want to use authentication provided by the service being proxied.
-
 ### Outputs
 
 The script will create or update bindings for the service and proxy app as needed.

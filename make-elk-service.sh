@@ -32,7 +32,6 @@ function parse_options () {
   u_flag=0;
 
   while getopts 'ha:d:s:u:' flag; do
-    echo "flag==$flag"
     case $flag in
       a) APP_NAME=$OPTARG; a_flag=1;;
       d) APP_DOMAIN=$OPTARG; d_flag=1;;

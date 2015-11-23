@@ -43,8 +43,6 @@ function parse_options () {
     esac
   done
 
-  echo "d_flag == $d_flag"
-
   # some options are required
   if [ $d_flag == 0 ]; then bail "-d domain is required; try -h for usage"; fi
   if [ $a_flag == 0 ]; then bail "-a appname is required; try -h for usage"; fi

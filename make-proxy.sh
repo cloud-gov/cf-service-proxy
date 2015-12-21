@@ -22,7 +22,7 @@ function help {
     echo "Create an ngnix proxy for Cloud Foundry service."
     echo " "
     echo "-a            name of application to check for service bindings"
-    echo "-p            print url and credentials to he console"
+    echo "-p            print url and credentials to the console"
     echo "-s            name of service to proxy"
     echo "-u            only print the connection string - useful for scripts"
     echo "-d            proxy route domain"

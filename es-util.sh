@@ -1,3 +1,4 @@
+#!/bin/bash
 ###
 # Vars
 ###
@@ -70,12 +71,18 @@ function log () {
 function backup_status () {
   while :
   do
-    SNAP_STATUS=$(curl -k -s "${SVC_PROXY}/_snapshot/${REPO_NAME}/${SNAP_NAME}" \
+    SNAP_STATUS_JSON=$(curl -k -s "${SVC_PROXY}/_snapshot/${REPO_NAME}/${SNAP_NAME}")
+    SNAP_STATUS=$(echo "$SNAP_STATUS_JSON" \
       | jq -r .snapshots[].state)
-    log "  - status: $SNAP_STATUS"
+    log "  - backup status: $SNAP_STATUS"
     if [ "$SNAP_STATUS" = "SUCCESS" ]
       then
       break
+    fi
+    if [ $? -gt 0 ]
+    then
+      log " - Failed to parse result: $SNAP_STATUS_JSON"
+      log " - continuing"
     fi
     sleep 1
   done
@@ -84,12 +91,18 @@ function backup_status () {
 function restore_status () {
   while :
   do
-    SNAP_STATUS=$(curl -k -s "${SVC_PROXY}/_recovery" \
+    SNAP_STATUS_JSON=$(curl -k -s "${SVC_PROXY}/_recovery")
+    SNAP_STATUS=$(echo "$SNAP_STATUS_JSON" \
        | jq -r '. | .["production-school-data"] | .shards[0].index.size.percent')
-    log "  - status: $SNAP_STATUS"
+    log "  - restore status: $SNAP_STATUS"
     if [ "$SNAP_STATUS" = "100.0%" ]
       then
       break
+    fi
+    if [ $? -gt 0 ]
+    then
+      log " - Failed to parse result: $SNAP_STATUS_JSON"
+      log " - continuing"
     fi
     sleep 10
   done
@@ -127,7 +140,7 @@ BUCKET=$(echo $SVC_JSON | jq -r '.resources[].entity.service_bindings[].entity.c
 ###
 # Create a snapshot repo.
 ###
-log "Attempting to create repo $REPO_NAME."
+log "Attempting to create repo $REPO_NAME using service proxy $SVC_PROXY"
 if [ -n "$REPO_NAME" ]
   then
   REPO_RESULT=$(curl -s -k -X PUT "${SVC_PROXY}/_snapshot/${REPO_NAME}" -d '{
@@ -142,6 +155,12 @@ if [ -n "$REPO_NAME" ]
   }')
 
   log "  - result: $(echo $REPO_RESULT | jq -c .)"
+  if [ $? -gt 0 ]
+  then
+    log " - Failed to parse result: $REPO_RESULT"
+    log " - exiting"
+    exit 1
+  fi
 fi
 
 ###
@@ -152,12 +171,27 @@ if [[ $LIST_SNAPS -eq 1 ]]
   then
   log ""
   log 'Snapshots:'
-  SNAP_LIST=$(curl -k -s "${SVC_PROXY}/_snapshot/${REPO_NAME}/_all" | jq -r .snapshots[].snapshot)
+  SNAP_LIST_JSON=$(curl -k -s "${SVC_PROXY}/_snapshot/${REPO_NAME}/_all")
+  SNAP_LIST=$(echo "$SNAP_LIST_JSON" | jq -r .snapshots[].snapshot)
+  if [ $? -gt 0 ]
+  then
+    log " - Failed to parse snap list: $SNAP_LIST_JSON"
+    log " - exiting"
+    exit 1
+  fi
+
   for SNAP in $SNAP_LIST
     do
       # Can probably do this better by requesting all snapshots as a list in one call.
       log "  - name: $SNAP"
-      log "    - status: $(curl -k -s "${SVC_PROXY}/_snapshot/${REPO_NAME}/${SNAP}/_status" | jq .snapshots[0].state)"
+      SNAP_STATUS_JSON=$(curl -k -s "${SVC_PROXY}/_snapshot/${REPO_NAME}/${SNAP}/_status")
+      log "    - status: $(echo "$SNAP_STATUS_JSON" | jq .snapshots[0].state)"
+      if [ $? -gt 0 ]
+      then
+        log " - Failed to parse status: $SNAP_STATUS_JSON"
+        log " - exiting"
+        exit 1
+      fi
     done
   exit 0
 fi

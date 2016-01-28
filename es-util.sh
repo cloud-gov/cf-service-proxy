@@ -22,6 +22,7 @@ function help {
     echo " "
     echo "-a            name of application to check for service bindings"
     echo "-p            service proxy to use"
+    echo "-n            snapshot name"
     echo "-s            name of the bucket service"
     echo "-c            create repo"
     echo "-r            restore mode"
@@ -77,7 +78,8 @@ function backup_status () {
     log "  - backup status: $SNAP_STATUS"
     if [ "$SNAP_STATUS" = "SUCCESS" ]
       then
-      break
+      log " - SUCCESS!!"
+      exit 0
     fi
     if [ $? -gt 0 ]
     then
@@ -133,14 +135,14 @@ log "Getting bindings for ${SERVICE_NAME}."
 SVC_JSON=$(cf curl \
   "/v2/spaces/$(cat ~/.cf/config.json | jq -rc .SpaceFields.Guid)/service_instances?return_user_provided_service_instances=true&q=name%3A${SERVICE_NAME}&inline-relations-depth=1")
 
-ACCESS_KEY=$(echo $SVC_JSON | jq -r '.resources[].entity.service_bindings[].entity.credentials.access_key | select(. != null)')
-SECRET_KEY=$(echo $SVC_JSON | jq -r '.resources[].entity.service_bindings[].entity.credentials.secret_key | select(. != null)')
-BUCKET=$(echo $SVC_JSON | jq -r '.resources[].entity.service_bindings[].entity.credentials.bucket | select(. != null)')
+ACCESS_KEY=$(echo $SVC_JSON | jq -r '.resources[].entity.service_bindings[].entity.credentials.access_key | select(. != null)' | head -n1 )
+SECRET_KEY=$(echo $SVC_JSON | jq -r '.resources[].entity.service_bindings[].entity.credentials.secret_key | select(. != null)' | head -n1 )
+BUCKET=$(echo $SVC_JSON | jq -r '.resources[].entity.service_bindings[].entity.credentials.bucket | select(. != null)' | head -n1 )
 
 ###
 # Create a snapshot repo.
 ###
-log "Attempting to create repo $REPO_NAME using service proxy $SVC_PROXY"
+log "Attempting to create repo '$REPO_NAME' using service proxy: $SVC_PROXY"
 if [ -n "$REPO_NAME" ]
   then
   REPO_RESULT=$(curl -s -k -X PUT "${SVC_PROXY}/_snapshot/${REPO_NAME}" -d '{

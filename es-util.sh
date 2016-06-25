@@ -131,7 +131,7 @@ fi
 log "Getting bindings for ${SERVICE_NAME}."
 
 SVC_JSON=$(cf curl \
-  "/v2/spaces/$(cat ~/.cf/config.json | jq -rc .SpaceFields.Guid)/service_instances?return_user_provided_service_instances=true&q=name%3A${SERVICE_NAME}&inline-relations-depth=1")
+  "/v2/spaces/$(cat ~/.cf/config.json | jq -rc .SpaceFields.GUID)/service_instances?return_user_provided_service_instances=true&q=name%3A${SERVICE_NAME}&inline-relations-depth=1")
 
 ACCESS_KEY=$(echo $SVC_JSON | jq -r '.resources[].entity.service_bindings[].entity.credentials.access_key | select(. != null)')
 SECRET_KEY=$(echo $SVC_JSON | jq -r '.resources[].entity.service_bindings[].entity.credentials.secret_key | select(. != null)')

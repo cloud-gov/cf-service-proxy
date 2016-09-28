@@ -263,10 +263,10 @@ ORG_NAME=$(jq -r .OrganizationFields.Name <(echo $CF_CONFIG))
 # Give the proxy a useful suffix.
 if [ -z $PROXY_NAME ];then
   SERVICE_APP=${SERVICE_NAME}-proxy
-  SERVICE_ALIAS=${ORG_NAME}-${SPACE_NAME}-${SERVICE_NAME}-proxy
+  SERVICE_ALIAS=$(echo "${ORG_NAME}-${SPACE_NAME}-${SERVICE_NAME}-proxy" | sed 's/\.//g')
 else
   SERVICE_APP=${PROXY_NAME}-proxy
-  SERVICE_ALIAS=${ORG_NAME}-${SPACE_NAME}-${PROXY_NAME}-proxy
+  SERVICE_ALIAS=$(echo "${ORG_NAME}-${SPACE_NAME}-${PROXY_NAME}-proxy" | sed 's/\.//g')
 fi
 
 # Domain.
@@ -323,6 +323,10 @@ fi
 log "  Port: ${SVC_PORT}"
 
 SVC_IP=$(jq -er '.hostname' <(echo $SVC_CREDENTIALS))
+
+if [ "${SVC_IP}" == "null" ]; then
+  SVC_IP=$(jq -er '.host' <(echo $SVC_CREDENTIALS))
+fi
 
 log "  IP: ${SVC_IP}"
 log ""

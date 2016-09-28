@@ -1,5 +1,5 @@
 #!/bin/bash
-# set -x
+set -x
 ###
 # Default Vars
 ###
@@ -251,6 +251,11 @@ function bind_env_var () {
 # GUID of the currently targeted space.
 CF_CONFIG=$(jq -rc . ~/.cf/config.json)
 SPACE_GUID=$(jq -r .SpaceFields.GUID <(echo $CF_CONFIG))
+
+if [ "${SPACE_GUID}" == "null" ]; then
+  SPACE_GUID=$(jq -r .SpaceFields.Guid <(echo $CF_CONFIG))
+fi
+
 SPACE_NAME=$(jq -r .SpaceFields.Name <(echo $CF_CONFIG))
 ORG_GUIDE=$(jq -r .OrganizationFields.GUID <(echo $CF_CONFIG))
 ORG_NAME=$(jq -r .OrganizationFields.Name <(echo $CF_CONFIG))

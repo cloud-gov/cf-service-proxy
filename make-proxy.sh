@@ -184,7 +184,7 @@ function get_proxy_env () {
   log "Getting app environment for $SERVICE_APP."
 
   PROXY_STATUS=$(cf curl \
-    "/v2/spaces/$(cat ~/.cf/config.json | jq -r .SpaceFields.GUID)/apps?q=name%3A${SERVICE_APP}&inline-relations-depth=1")
+    "/v2/spaces/${SPACE_GUID}/apps?q=name%3A${SERVICE_APP}&inline-relations-depth=1")
 
   PROXY_ENV=$(jq -er '.resources[].entity.environment_json' <(echo $PROXY_STATUS))
 

@@ -184,7 +184,7 @@ function get_proxy_env () {
   log "Getting app environment for $SERVICE_APP."
 
   PROXY_STATUS=$(cf curl \
-    "/v2/spaces/$(cat ~/.cf/config.json | jq -r .SpaceFields.GUID)/apps?q=name%3A${SERVICE_APP}&inline-relations-depth=1")
+    "/v2/spaces/${SPACE_GUID}/apps?q=name%3A${SERVICE_APP}&inline-relations-depth=1")
 
   PROXY_ENV=$(jq -er '.resources[].entity.environment_json' <(echo $PROXY_STATUS))
 
@@ -251,6 +251,11 @@ function bind_env_var () {
 # GUID of the currently targeted space.
 CF_CONFIG=$(jq -rc . ~/.cf/config.json)
 SPACE_GUID=$(jq -r .SpaceFields.GUID <(echo $CF_CONFIG))
+
+if [ "${SPACE_GUID}" == "null" ]; then
+  SPACE_GUID=$(jq -r .SpaceFields.Guid <(echo $CF_CONFIG))
+fi
+
 SPACE_NAME=$(jq -r .SpaceFields.Name <(echo $CF_CONFIG))
 ORG_GUIDE=$(jq -r .OrganizationFields.GUID <(echo $CF_CONFIG))
 ORG_NAME=$(jq -r .OrganizationFields.Name <(echo $CF_CONFIG))
@@ -258,10 +263,10 @@ ORG_NAME=$(jq -r .OrganizationFields.Name <(echo $CF_CONFIG))
 # Give the proxy a useful suffix.
 if [ -z $PROXY_NAME ];then
   SERVICE_APP=${SERVICE_NAME}-proxy
-  SERVICE_ALIAS=${ORG_NAME}-${SPACE_NAME}-${SERVICE_NAME}-proxy
+  SERVICE_ALIAS=$(echo "${ORG_NAME}-${SPACE_NAME}-${SERVICE_NAME}-proxy" | sed 's/\.//g')
 else
   SERVICE_APP=${PROXY_NAME}-proxy
-  SERVICE_ALIAS=${ORG_NAME}-${SPACE_NAME}-${PROXY_NAME}-proxy
+  SERVICE_ALIAS=$(echo "${ORG_NAME}-${SPACE_NAME}-${PROXY_NAME}-proxy" | sed 's/\.//g')
 fi
 
 # Domain.
@@ -318,6 +323,10 @@ fi
 log "  Port: ${SVC_PORT}"
 
 SVC_IP=$(jq -er '.hostname' <(echo $SVC_CREDENTIALS))
+
+if [ "${SVC_IP}" == "null" ]; then
+  SVC_IP=$(jq -er '.host' <(echo $SVC_CREDENTIALS))
+fi
 
 log "  IP: ${SVC_IP}"
 log ""
